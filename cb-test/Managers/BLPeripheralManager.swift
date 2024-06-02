@@ -1,149 +1,161 @@
 import Foundation
 import CoreBluetooth
+import os
 
-class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate, CBCentralManagerDelegate, CBPeripheralDelegate {
-    static let shared = BluetoothManager()
-    var peripheralManager: CBPeripheralManager!
-    var centralManager: CBCentralManager!
-    var transferCharacteristic: CBMutableCharacteristic?
-    var discoveredPeripherals: [CBPeripheral] = []
-    var transferCharacteristics: [CBPeripheral: CBCharacteristic] = [:]
-    var connectedCentrals: [CBCentral] = []
-    var isConnecting: Bool = false // Track the connection state
+struct TransferService {
+    static let serviceUUID = CBUUID(string: "E20A39F4-73F5-4BC4-A12F-17D1AD07A961")
+    static let characteristicUUID = CBUUID(string: "08590F7E-DB05-467E-8757-72F6FAEB13D4")
+}
 
+class BLPeripheralManager: NSObject, ObservableObject {
+    static let shared = BLPeripheralManager()
+    private var peripheralManager: CBPeripheralManager!
+    private var transferCharacteristic: CBMutableCharacteristic?
+    private var connectedCentral: CBCentral?
+    private var dataToSend = Data()
+    private var sendDataIndex: Int = 0
+    private static var sendingEOM = false
+    
     override init() {
         super.init()
-        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
-        centralManager = CBCentralManager(delegate: self, queue: nil)
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil, options: [CBPeripheralManagerOptionShowPowerAlertKey: true])
     }
-
-    // Peripheral (Server) Side Methods
-    func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
-        print("Peripheral manager state: \(peripheral.state.rawValue)")
-        if peripheral.state == .poweredOn {
-            startAdvertising()
-        } else {
-            print("Peripheral is not powered on.")
-        }
+    
+    func initSetup() {
+        setupPeripheral()
     }
-
+    
     func startAdvertising() {
-        let transferServiceUUID = CBUUID(string: "1234")
-        transferCharacteristic = CBMutableCharacteristic(
-            type: CBUUID(string: "5678"),
-            properties: [.notify, .read, .writeWithoutResponse],
-            value: nil,
-            permissions: [.readable, .writeable]
-        )
-
-        let transferService = CBMutableService(type: transferServiceUUID, primary: true)
-        transferService.characteristics = [transferCharacteristic!]
+        peripheralManager.startAdvertising([CBAdvertisementDataServiceUUIDsKey: [TransferService.serviceUUID]])
+    }
+    
+    func stopAdvertising() {
+        peripheralManager.stopAdvertising()
+    }
+    
+    func sendData(_ text: String) {
+        dataToSend = text.data(using: .utf8)!
+        sendDataIndex = 0
+        sendDataChunks()
+    }
+    
+    private func setupPeripheral() {
+        let transferCharacteristic = CBMutableCharacteristic(type: TransferService.characteristicUUID,
+                                                             properties: [.notify, .writeWithoutResponse],
+                                                             value: nil,
+                                                             permissions: [.readable, .writeable])
+        
+        let transferService = CBMutableService(type: TransferService.serviceUUID, primary: true)
+        transferService.characteristics = [transferCharacteristic]
         peripheralManager.add(transferService)
-
-        peripheralManager.startAdvertising([
-            CBAdvertisementDataServiceUUIDsKey: [transferServiceUUID]
-        ])
-        print("Started advertising service with UUID \(transferServiceUUID.uuidString)")
+        self.transferCharacteristic = transferCharacteristic
     }
-
-    func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
-        connectedCentrals.append(central)
-        print("Central \(central.identifier) subscribed to characteristic \(characteristic.uuid).")
-    }
-
-    func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
-        for request in requests {
-            if request.characteristic.uuid == transferCharacteristic?.uuid {
-                if let value = request.value {
-                    let message = String(data: value, encoding: .utf8) ?? "Unknown"
-                    print("Received message: \(message) from central \(request.central.identifier)")
-                }
+    
+    private func sendDataChunks() {
+        guard let transferCharacteristic = transferCharacteristic else { return }
+        
+        if BLPeripheralManager.sendingEOM {
+            let didSend = peripheralManager.updateValue("EOM".data(using: .utf8)!, for: transferCharacteristic, onSubscribedCentrals: nil)
+            if didSend {
+                BLPeripheralManager.sendingEOM = false
+                os_log("Sent: EOM")
             }
-            peripheralManager.respond(to: request, withResult: .success)
+            return
         }
-    }
-
-    func sendData(_ data: Data) {
-        for central in connectedCentrals {
-            peripheralManager.updateValue(data, for: transferCharacteristic!, onSubscribedCentrals: [central])
+        
+        if sendDataIndex >= dataToSend.count {
+            return
         }
-    }
-
-    // Central (Client) Side Methods
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        print("Central manager state: \(central.state.rawValue)")
-        if central.state == .poweredOn {
-            startScanning()
-        } else {
-            print("Central is not powered on.")
-        }
-    }
-
-    func startScanning() {
-        centralManager.scanForPeripherals(withServices: [CBUUID(string: "1234")], options: [
-            CBCentralManagerScanOptionAllowDuplicatesKey: NSNumber(value: true)
-        ])
-        print("Started scanning for peripherals with service UUID 1234")
-    }
-
-    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        print("Discovered peripheral: \(peripheral.identifier)")
-        if !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) {
-            discoveredPeripherals.append(peripheral)
+        
+        var didSend = true
+        while didSend {
+            var amountToSend = dataToSend.count - sendDataIndex
+            if let mtu = connectedCentral?.maximumUpdateValueLength {
+                amountToSend = min(amountToSend, mtu)
+            }
             
-            // Implement a decision mechanism to avoid race conditions
-            if !isConnecting && shouldConnectToPeripheral(peripheral) {
-                isConnecting = true
-                centralManager.connect(peripheral, options: nil)
-                print("Connecting to peripheral: \(peripheral.identifier)")
+            let chunk = dataToSend.subdata(in: sendDataIndex..<(sendDataIndex + amountToSend))
+            didSend = peripheralManager.updateValue(chunk, for: transferCharacteristic, onSubscribedCentrals: nil)
+            
+            if !didSend {
+                return
+            }
+            
+            let stringFromData = String(data: chunk, encoding: .utf8)
+            os_log("Sent %d bytes: %s", chunk.count, String(describing: stringFromData))
+            
+            sendDataIndex += amountToSend
+            
+            if sendDataIndex >= dataToSend.count {
+                BLPeripheralManager.sendingEOM = true
+                let eomSent = peripheralManager.updateValue("EOM".data(using: .utf8)!, for: transferCharacteristic, onSubscribedCentrals: nil)
+                if eomSent {
+                    BLPeripheralManager.sendingEOM = false
+                    os_log("Sent: EOM")
+                }
+                return
             }
         }
     }
+}
 
-    func shouldConnectToPeripheral(_ peripheral: CBPeripheral) -> Bool {
-        // Custom logic to determine if this device should initiate the connection
-        // For example, based on UUID comparison:
-        return peripheral.identifier.uuidString < centralManager.retrieveConnectedPeripherals(withServices: []).first?.identifier.uuidString ?? ""
-    }
-
-    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        print("Connected to peripheral: \(peripheral.identifier)")
-        peripheral.delegate = self
-        peripheral.discoverServices([CBUUID(string: "1234")])
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        if let services = peripheral.services {
-            for service in services {
-                peripheral.discoverCharacteristics([CBUUID(string: "5678")], for: service)
-                print("Discovered service: \(service.uuid) on peripheral: \(peripheral.identifier)")
-            }
-        }
-    }
-
-    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        if let characteristics = service.characteristics {
-            for characteristic in characteristics {
-                if characteristic.uuid == CBUUID(string: "5678") {
-                    transferCharacteristics[peripheral] = characteristic
-                    peripheral.setNotifyValue(true, for: characteristic)
-                    print("Discovered characteristic: \(characteristic.uuid) on peripheral: \(peripheral.identifier)")
+extension BLPeripheralManager: CBPeripheralManagerDelegate {
+    func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        switch peripheral.state {
+        case .poweredOn:
+            os_log("CBManager is powered on")
+            setupPeripheral()
+        case .poweredOff:
+            os_log("CBManager is not powered on")
+            return
+        case .resetting:
+            os_log("CBManager is resetting")
+            return
+        case .unauthorized:
+            if #available(iOS 13.0, *) {
+                switch peripheral.authorization {
+                case .denied:
+                    os_log("You are not authorized to use Bluetooth")
+                case .restricted:
+                    os_log("Bluetooth is restricted")
+                default:
+                    os_log("Unexpected authorization")
                 }
             }
+            return
+        case .unknown:
+            os_log("CBManager state is unknown")
+            return
+        case .unsupported:
+            os_log("Bluetooth is not supported on this device")
+            return
+        @unknown default:
+            os_log("A previously unknown peripheral manager state occurred")
+            return
         }
     }
-
-    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        if let value = characteristic.value {
-            let message = String(data: value, encoding: .utf8) ?? "Unknown"
-            print("Received message: \(message) from peripheral \(peripheral.identifier)")
-        }
+    
+    func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
+        os_log("Central subscribed to characteristic")
+        connectedCentral = central
+        sendDataChunks()
     }
-
-    func sendDataToPeripheral(_ data: Data) {
-        for (peripheral, characteristic) in transferCharacteristics {
-            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
-            print("Sent data to peripheral: \(peripheral.identifier)")
+    
+    func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
+        os_log("Central unsubscribed from characteristic")
+        connectedCentral = nil
+    }
+    
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        sendDataChunks()
+    }
+    
+    func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
+        for aRequest in requests {
+            guard let requestValue = aRequest.value,
+                  let stringFromData = String(data: requestValue, encoding: .utf8) else { continue }
+            
+            os_log("Received write request of %d bytes: %s", requestValue.count, stringFromData)
         }
     }
 }

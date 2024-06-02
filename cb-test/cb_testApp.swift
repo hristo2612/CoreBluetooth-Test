@@ -10,12 +10,15 @@ import SwiftUI
 @main
 struct cb_testApp: App {
     init() {
+        // BLPeripheralManager.shared.initSetup()
+        // BLCentralManager.shared.startScan()
     }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(BluetoothManager.shared)
+                .environmentObject(BLPeripheralManager.shared)
+                .environmentObject(BLCentralManager.shared)
         }
     }
 }
