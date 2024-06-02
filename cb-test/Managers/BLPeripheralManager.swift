@@ -19,6 +19,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
 
     // Peripheral (Server) Side Methods
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        print("Peripheral manager state: \(peripheral.state.rawValue)")
         if peripheral.state == .poweredOn {
             startAdvertising()
         } else {
@@ -42,6 +43,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
         peripheralManager.startAdvertising([
             CBAdvertisementDataServiceUUIDsKey: [transferServiceUUID]
         ])
+        print("Started advertising service with UUID \(transferServiceUUID.uuidString)")
     }
 
     func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
@@ -69,6 +71,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
 
     // Central (Client) Side Methods
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        print("Central manager state: \(central.state.rawValue)")
         if central.state == .poweredOn {
             startScanning()
         } else {
@@ -80,9 +83,11 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
         centralManager.scanForPeripherals(withServices: [CBUUID(string: "1234")], options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: NSNumber(value: true)
         ])
+        print("Started scanning for peripherals with service UUID 1234")
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        print("Discovered peripheral: \(peripheral.identifier)")
         if !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) {
             discoveredPeripherals.append(peripheral)
             
@@ -90,6 +95,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
             if !isConnecting && shouldConnectToPeripheral(peripheral) {
                 isConnecting = true
                 centralManager.connect(peripheral, options: nil)
+                print("Connecting to peripheral: \(peripheral.identifier)")
             }
         }
     }
@@ -101,6 +107,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        print("Connected to peripheral: \(peripheral.identifier)")
         peripheral.delegate = self
         peripheral.discoverServices([CBUUID(string: "1234")])
     }
@@ -109,6 +116,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
         if let services = peripheral.services {
             for service in services {
                 peripheral.discoverCharacteristics([CBUUID(string: "5678")], for: service)
+                print("Discovered service: \(service.uuid) on peripheral: \(peripheral.identifier)")
             }
         }
     }
@@ -119,6 +127,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
                 if characteristic.uuid == CBUUID(string: "5678") {
                     transferCharacteristics[peripheral] = characteristic
                     peripheral.setNotifyValue(true, for: characteristic)
+                    print("Discovered characteristic: \(characteristic.uuid) on peripheral: \(peripheral.identifier)")
                 }
             }
         }
@@ -134,6 +143,7 @@ class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate,
     func sendDataToPeripheral(_ data: Data) {
         for (peripheral, characteristic) in transferCharacteristics {
             peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
+            print("Sent data to peripheral: \(peripheral.identifier)")
         }
     }
 }
