@@ -1,7 +1,7 @@
 import Foundation
 import CoreBluetooth
 
-class BluetoothManager: NSObject, CBPeripheralManagerDelegate, CBCentralManagerDelegate, CBPeripheralDelegate {
+class BluetoothManager: NSObject, ObservableObject, CBPeripheralManagerDelegate, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let shared = BluetoothManager()
     var peripheralManager: CBPeripheralManager!
     var centralManager: CBCentralManager!

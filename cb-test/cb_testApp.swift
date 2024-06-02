@@ -10,14 +10,12 @@ import SwiftUI
 @main
 struct cb_testApp: App {
     init() {
-        BluetoothManager.shared.startAdvertising()
-        BluetoothManager.shared.startScanning()
     }
     
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(CBManager())
+                .environmentObject(BluetoothManager.shared)
         }
     }
 }
