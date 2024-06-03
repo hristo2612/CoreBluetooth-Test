@@ -9,7 +9,7 @@ class BLCentralManager: NSObject, ObservableObject {
     private var transferCharacteristic: CBCharacteristic?
     private var writeIterationsComplete = 0
     private var connectionIterationsComplete = 0
-    private let defaultIterations = 1000
+    private let defaultIterations = 1
     private var data = Data()
 
     override init() {
@@ -69,7 +69,7 @@ class BLCentralManager: NSObject, ObservableObject {
             writeIterationsComplete += 1
         }
         if writeIterationsComplete == defaultIterations {
-            discoveredPeripheral.setNotifyValue(false, for: transferCharacteristic)
+            // discoveredPeripheral.setNotifyValue(false, for: transferCharacteristic)
         }
     }
 }
@@ -105,7 +105,7 @@ extension BLCentralManager: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        guard RSSI.intValue >= -50 else {
+        guard RSSI.intValue >= -90 else {
             os_log("Discovered peripheral not in expected range, at %d", RSSI.intValue)
             return
         }

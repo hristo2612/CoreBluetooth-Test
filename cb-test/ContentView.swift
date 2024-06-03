@@ -11,7 +11,8 @@ struct ContentView: View {
     var body: some View {
         VStack {
             Button {
-                
+                BLPeripheralManager.shared.sendData("Hello from Personal (Peripheral)")
+                BLCentralManager.shared.writeData("Hello from Personal (Central)")
             } label: {
                 Text("Connect to Magic Keyboard")
             }

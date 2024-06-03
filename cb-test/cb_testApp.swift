@@ -10,8 +10,11 @@ import SwiftUI
 @main
 struct cb_testApp: App {
     init() {
-        // BLPeripheralManager.shared.initSetup()
-        // BLCentralManager.shared.startScan()
+        BLPeripheralManager.shared.initSetup()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            BLPeripheralManager.shared.startAdvertising()
+        }
+        BLCentralManager.shared.startScan()
     }
     
     var body: some Scene {
