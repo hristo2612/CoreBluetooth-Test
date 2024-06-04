@@ -10,9 +10,9 @@ import SwiftUI
 @main
 struct cb_testApp: App {
     init() {
-        BLPeripheralManager.shared.initSetup()
+        // BLPeripheralManager.shared.initSetup()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            BLPeripheralManager.shared.startAdvertising()
+            // BLPeripheralManager.shared.startAdvertising()
         }
         BLCentralManager.shared.startScan()
     }
@@ -20,7 +20,7 @@ struct cb_testApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(BLPeripheralManager.shared)
+                // .environmentObject(BLPeripheralManager.shared)
                 .environmentObject(BLCentralManager.shared)
         }
     }

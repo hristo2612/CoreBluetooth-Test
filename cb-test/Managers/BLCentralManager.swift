@@ -65,7 +65,7 @@ class BLCentralManager: NSObject, ObservableObject {
             let packetData = Data(bytes: rawPacket, count: bytesToCopy)
             let stringFromData = String(data: packetData, encoding: .utf8)
             os_log("Writing %d bytes: %s", bytesToCopy, String(describing: stringFromData))
-            discoveredPeripheral.writeValue(packetData, for: transferCharacteristic, type: .withoutResponse)
+            discoveredPeripheral.writeValue(packetData, for: transferCharacteristic, type: .withResponse)
             writeIterationsComplete += 1
         }
         if writeIterationsComplete == defaultIterations {
@@ -183,6 +183,7 @@ extension BLCentralManager: CBPeripheralDelegate {
             cleanup()
             return
         }
+        print("DID UPDATE VALUE FOR:")
         guard let characteristicData = characteristic.value, let stringFromData = String(data: characteristicData, encoding: .utf8) else { return }
         os_log("Received %d bytes: %s", characteristicData.count, stringFromData)
         if stringFromData == "EOM" {
@@ -190,6 +191,10 @@ extension BLCentralManager: CBPeripheralDelegate {
         } else {
             data.append(characteristicData)
         }
+    }
+    
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        print("WROTE VALUE FOR CHARACTERISTIC. ERROR: \(String(describing: error?.localizedDescription))")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
